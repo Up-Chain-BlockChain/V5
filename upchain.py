@@ -1,637 +1,505 @@
-python
-
 # Importing the necessary libraries
+import hashlib # for data hashing
+import json # for data serialization
+import time # to get timestamps
+import random # to generate random numbers and words
+import requests # to send and receive requests to other network nodes
 
-import hashlib
-import json
-import random
-import time
-from datetime import datetime
+# Defining constants
+MAX_SUPPLY = 100000000000 # the maximum number of coins that can be mined
+BURN_RATE = 0.0001 # percentage of coins burned from the transaction amount
+BURN_THRESHOLD = 50000000000 # the number of coins burned, after which the burning stops
+BURN_ADDRESS = "0x0000000000000000000000000000000000000000" # the address to which the burned coins are sent
+MINING_REWARD = 50 # reward for mining a block in coins (The number is indicated as an example)
+DIFFICULTY = 4 # initial mining difficulty (the number of zeros at the beginning of the block hash)
+STARTUP_FEE = 10 # commission for adding a startup to a block in coins
+NFT_FEE = 5 # commission for adding NFT to a block in coins
+TOKEN_FEE = 5 # commission for adding a token to a block in coins
+DAPP_FEE = 5 # commission for adding a DApp to a block in coins
+WORD_LIST = ["apple", "banana", "carrot", "dog", "elephant", "fish", "giraffe", "house", "ice", "jacket", "kite", "lion", "moon", "nose", "orange", "pencil", "queen", "rainbow", "star", "tree", "umbrella", "vase", "water", "xylophone", "yarn", "zebra"] # list of words for generating addresses
 
-# We create the Block class, which represents a block in the blockchain
-
+# Defining the block class
 class Block:
-    # The class constructor accepts parameters:
-    # index - block number in the chain
-    # timestamp - block creation time
-    # transactions - list of transactions included in the block
-    # previous_hash - hash of the previous block in the chain
-    # nonce - random number used to generate the block hash
-    def _init_(self, index, timestamp, transactions, previous_hash, nonce):
-        self.index = index
-        self.timestamp = timestamp
-        self.transactions = transactions
-        self.previous_hash = previous_hash
-        self.nonce = nonce
+    # Class constructor
+    def _init_(self, index, timestamp, transactions, previous_hash, nonce, hash):
+        self.index = index # sequence number of the block in the chain
+        self.timestamp = timestamp # block creation time
+        self.transactions = transactions # list of transactions in the block
+        self.previous_hash = previous_hash # hash of the previous block
+        self.nonce = nonce # random number used for mining
+        self.hash = hash # current block hash
 
-    # Method that returns the hash of a block using the SHA-256 algorithm
-    def hash(self):
-        # Converting block attributes to a string in JSON format
-        block_string = json.dumps(self._dict_, sort_keys=True)
-        # Calculate the hash of a string using the hashlib library
-        return hashlib.sha256(block_string.encode()).hexdigest()
+    # Method for serializing a block into JSON format
+    def to_json(self):
+        return json.dumps(self._dict_, sort_keys=True)
 
-# We create the Blockchain class, which represents a chain of blocks
+# Defining the transaction class
+class Transaction:
+    # Class constructor
+    def _init_(self, sender, recipient, amount, fee, data):
+        self.sender = sender # sender's address
+        self.recipient = recipient # address of the recipient
+        self.amount = amount # transfer amount in coins
+        self.fee = fee # transaction fee in coins
+        self.data = data # additional transaction data (for example, information about the startup, NFT, token or DApp)
+        self.hash = self.calculate_hash() # transaction hash
+
+    # Method for calculating transaction hash
+    def calculate_hash(self):
+        # We serialize the transaction in JSON format and encode it into bytes
+        transaction_string = json.dumps(self._dict_, sort_keys=True).encode()
+        # Returning the transaction hash in hexadecimal format
+        return hashlib.sha256(transaction_string).hexdigest()
+
+# Defining the blockchain class
 class Blockchain:
-    # The class constructor accepts parameters:
-    # difficulty - the complexity of calculating a block hash is determined by the number of zeros at the beginning of the hash
-    # reward - block mining reward in UPC
-    def _init_(self, difficulty, reward):
-        self.difficulty = difficulty
-        self.reward = reward
-        self.chain = [] # List of blocks in the chain
-        self.pending_transactions = [] # List of pending transactions
-        self.startups = {} # Startup dictionary, key - startup name, value - information about the startup
-        self.tokens = {} # Token dictionary, key - token name, value - information about the token
-        self.dapps = {} # DApps dictionary, key - DApp name, value - information about DApp
-        self.create_genesis_block() # We create a genesis block, the first block in the chain
+    # Class constructor
+    def _init_(self):
+        self.chain = [] # list of blocks in the chain
+        self.pending_transactions = [] # list of pending transactions
+        self.nodes = set() # many addresses of other network nodes
+        self.burned_coins = 0 # number of coins burned
+        self.create_genesis_block() # create a genesis block
 
-    # A method that creates a genesis block and adds it to the chain
+    # Method for creating a genesis block
     def create_genesis_block(self):
-        # Create an instance of the Block class with arbitrary parameters
-        genesis_block = Block(0, time.time(), [], "0", 0)
-        # Adding a genesis block to the chain
+        # Create the first block with arbitrary data
+        genesis_block = Block(0, time.time(), [], "0", 0, "0")
+        # Add it to the chain
         self.chain.append(genesis_block)
+        # Generating the first address of the blockchain creator
+        creator_address = self.generate_address()
+        # We create a transaction that credits the maximum number of coins to this address
+        genesis_transaction = Transaction("0", creator_address, MAX_SUPPLY, 0, None)
+        # Add this transaction to the block
+        genesis_block.transactions.append(genesis_transaction)
 
-    # Method that returns the last block in the chain
+    # Method for generating a new address
+    def generate_address(self):
+        # Selecting 24 random words from the list
+        words = random.sample(WORD_LIST, 24)
+        # We connect them into one line with spaces
+        address_string = " ".join(words)
+        # We hash this string using SHA256 and return the result in hexadecimal format
+        return hashlib.sha256(address_string.encode()).hexdigest()
+
+    # Method to get the last block in the chain
     def get_last_block(self):
         return self.chain[-1]
 
-    # Method that adds a new transaction to the list of pending transactions
-    # Accepts parameters:
-    # sender - sender's address
-    # receiver - address of the recipient
-    # amount - transfer amount in UPC
-    # token - token name if the transfer is carried out in tokens, otherwise None
-    # type - transaction type maybe "transfer", "create_startup", "create_token", "create_dapp"
-    # data - additional transaction data, depending on the type
-    def add_transaction(self, sender, receiver, amount, token, type, data):
-        # Create a dictionary with transaction parameters
-        transaction = {
-            "sender": sender,
-            "receiver": receiver,
-            "amount": amount,
-            "token": token,
-            "type": type,
-            "data": data
-        }
-        # Adding a transaction to the list of pending transactions
-        self.pending_transactions.append(transaction)
-        # We return the block number in which the transaction will be included
-        return self.get_last_block().index + 1
-
-    # The method that checks the validity of the transaction takes the following parameter:
-    # transaction - dictionary with transaction parameters
-    def validate_transaction(self, transaction):
-        # Getting transaction parameters
-        sender = transaction["sender"]
-        receiver = transaction["receiver"]
-        amount = transaction["amount"]
-        token = transaction["token"]
-        type = transaction["type"]
-        data = transaction["data"]
-        # Checking that the sender and recipient are not None
-        if sender is None or receiver is None:
-            return False
-        # We check that the transfer amount is positive
-        if amount <= 0:
-            return False
-        # Checking that the transaction type is correct
-        if type not in ["transfer", "create_startup", "create_token", "create_dapp"]:
-            return False
-        # We check that the token exists if the transfer is carried out in tokens
-        if token is not None and token not in self.tokens:
-            return False
-        # We check that the sender has enough funds for the transfer
-        if not self.has_enough_balance(sender, amount, token):
-            return False
-        # We check that the transaction data is correct, depending on the type
-        if type == "create_startup":
-            # Checking that the transaction data is a dictionary
-            if not isinstance(data, dict):
-                return False
-            # Checking that the dictionary contains the necessary keys
-            if "name" not in data or "description" not in data or "start_date" not in data or "end_date" not in data or "goal" not in data:
-                return False
-            # Checking that the startup name is unique
-            if data["name"] in self.startups:
-                return False
-            # Checking that the startup description is not empty
-            if data["description"] == "":
-                return False
-            # We check that the start and end dates of fundraising are correct
-            try:
-                start_date = datetime.strptime(data["start_date"], "%Y-%m-%d")
-                end_date = datetime.strptime(data["end_date"], "%Y-%m-%d")
-                if start_date > end_date:
-                    return False
-            except ValueError:
-                return False
-            # We check that the fundraising goal is positive
-            if data["goal"] <= 0:
-                return False
-        elif type == "create_token":
-            # Checking that the transaction data is a dictionary
-            if not isinstance(data, dict):
-                return False
-            # Checking that the dictionary contains the necessary keys
-            if "name" not in data or "symbol" not in data or "supply" not in data:
-                return False
-            # Checking that the token name and symbol are unique
-            if data["name"] in self.tokens or data["symbol"] in self.tokens:
-                return False
-            # Проверяем, что общее количество токенов положительно
-            if data["supply"] <= 0:
-                return False
-        elif type == "create_dapp":
-            # Checking that the transaction data is a dictionary
-            if not isinstance(data, dict):
-                return False
-            # Checking that the dictionary contains the necessary keys
-            if "name" not in data or "description" not in data or "code" not in data:
-                return False
-            # Checking that the DApp name is unique
-            if data["name"] in self.dapps:
-                return False
-            # Checking that the DApp description and code are not empty
-        if data["description"] == "" or data["code"] == "":
-                return False
-        # If all checks pass, return True
-        return True
-
-    # The method that checks that the address has enough funds for the transfer takes the following parameters:
-    # address - address who wants to make a transfer
-    # amount - transfer amount in UPC or tokens
-    # token - token name if the transfer is carried out in tokens, otherwise None
-    def has_enough_balance(self, address, amount, token):
-        # We get the address balance in UPC or tokens
-        balance = self.get_balance(address, token)
-        # Compare balance and transfer amount
-        return balance >= amount
-
-    # The method that returns the address balance in UPC or tokens takes the following parameters:
-    # address - the address for which you want to get the balance
-    # token - token name, if you need to get the balance in tokens, otherwise None
-    def get_balance(self, address, token):
-        # Initialize the balance to zero
-        balance = 0
-        # We go through all the blocks in the chain
-        for block in self.chain:
-            # We go through all transactions in the block
-            for transaction in block.transactions:
-                # We check that the transaction refers to the required token
-                if transaction["token"] == token:
-                    # Checking whether the address is the sender or recipient of the transaction
-                    if transaction["sender"] == address:
-                        # Reduce the balance by the transaction amount
-                        balance -= transaction["amount"]
-                    elif transaction["receiver"] == address:
-                        # We increase the balance by the transaction amount
-                        balance += transaction["amount"]
-        # We return the balance
-        return balance
-
-    # The method that mines a new block and adds it to the chain takes the following parameter:
-    # miner_address - address of the miner who will receive a reward for mining
-    def mine_block(self, miner_address):
-        # We get the number, time and hash of the last block in the chain
-        last_block = self.get_last_block()
-        last_index = last_block.index
-        last_hash = last_block.hash()
-        timestamp = time.time()
-        # Create a list to store valid transactions
-        valid_transactions = []
-        # We go through the list of pending transactions
-        for transaction in self.pending_transactions:
-            # Checking the validity of the transaction
-            if self.validate_transaction(transaction):
-                # Add the transaction to the list of valid ones
-                valid_transactions.append(transaction)
-        # Add a transaction with a mining reward to the beginning of the list of valid transactions
-        reward_transaction = {
-            "sender": None,
-            "receiver": miner_address,
-            "amount": self.reward,
-            "token": None,
-            "type": "transfer",
-            "data": None
-        }
-        valid_transactions.insert(0, reward_transaction)
-        # Initialize the nonce to zero
-        nonce = 0
-        # Create an instance of the Block class with parameters
-        new_block = Block(last_index + 1, timestamp, valid_transactions, last_hash, nonce)
-        # While the hash of the new block does not satisfy the complexity condition, we increase the nonce and recalculate the hash
-        while not new_block.hash().startswith("0" * self.difficulty):
-            nonce += 1
-            new_block.nonce = nonce
-        # Adding a new block to the chain
-        self.chain.append(new_block)
-        # Clearing the list of pending transactions
-        self.pending_transactions = []
-        # We update information about startups, tokens and DApps in accordance with transactions in the new block
-        self.update_info(new_block)
-        # Returning a new block
-        return new_block
-
-    # The method, which updates information about startups, tokens and DApps according to transactions in the block, takes the parameter:
-    # block - block class instance
-    def update_info(self, block):
-        # We go through all transactions in the block
-        for transaction in block.transactions:
-            # Getting the transaction type and data
-            type = transaction["type"]
-            data = transaction["data"]
-            # If the transaction type is the creation of a startup
-            if type == "create_startup":
-                # Adding startup information to the startup dictionary
-                self.startups[data["name"]] = data
-            # If the transaction type is token creation
-            elif type == "create_token":
-                # Adding information about the token to the token dictionary
-                self.tokens[data["name"]] = data
-                self.tokens[data["symbol"]] = data
-            # If the transaction type is DApp creation
-            elif type == "create_dapp":
-                # Adding information about DApps to the DApps dictionary
-                self.dapps[data["name"]] = data
-
-    # The method that checks the validity of the block chain takes the following parameter:
-    # chain - list of blocks to check
-    def validate_chain(self, chain):
-        # Checking that the chain is not empty
-        if len(chain) == 0:
-            return False
-        # We check that the first block in the chain is a genesis block
-        genesis_block = chain[0]
-        if genesis_block.index != 0 or genesis_block.previous_hash != "0" or genesis_block.nonce != 0:
-            return False
-        # We go through all the blocks in the chain, starting from the second
-        for i in range(1, len(chain)):
-            # We get the current and previous blocks
-            current_block = chain[i]
-            previous_block = chain[i-1]
-            # We check that the index of the current block is one greater than the index of the previous block
-            if current_block.index != previous_block.index + 1:
-                return False
-            # We check that the hash of the previous block in the current block matches the real hash of the previous block
-            if current_block.previous_hash != previous_block.hash():
-              if data["description"] == "" or data["code"] == "":
-                return False
-        # If all checks pass, return True
-        return True
-
-    # The method that checks that the address has enough funds for the transfer takes the following parameters:
-    # address - address who wants to make a transfer
-    # amount - transfer amount in UPC or tokens
-    # token - token name if the transfer is carried out in tokens, otherwise None
-    def has_enough_balance(self, address, amount, token):
-        # We get the address balance in UPC or tokens
-        balance = self.get_balance(address, token)
-        # Compare the balance with the transfer amount
-        if balance >= amount:
+    # Method for adding a new block to the chain
+    def add_block(self, block):
+        # We check that the block has the correct index, hash and link to the previous block
+        if block.index == len(self.chain) and block.hash == block.calculate_hash() and block.previous_hash == self.get_last_block().hash:
+            # Adding a block to the chain
+            self.chain.append(block)
+            # Clearing the list of pending transactions
+            self.pending_transactions = []
+            # Clearing the list of pending transactions
             return True
         else:
+            # Return False if the block is invalid
             return False
 
-    # The method that returns the address balance in UPC or tokens takes the following parameters:
-    # address - address for which you need to receive the balance
-    # token - token name, if you need to get the balance in tokens, otherwise None
-    def get_balance(self, address, token):
+    # Method for creating a new transaction
+    def create_transaction(self, sender, recipient, amount, fee, data):
+        # Checking that the sender and recipient have the correct address format
+        if len(sender) == 64 and len(recipient) == 64:
+            # We check that the amount and commission are non-negative and do not exceed the maximum number of coins
+            if 0 <= amount <= MAX_SUPPLY and 0 <= fee <= MAX_SUPPLY:
+                # We check that the sender has sufficient funds for the transfer
+                if self.get_balance(sender) >= amount + fee:
+                    # Create a new transaction
+                    transaction = Transaction(sender, recipient, amount, fee, data)
+                    # Add it to the list of pending transactions
+                    self.pending_transactions.append(transaction)
+                    # Returning the transaction hash
+                    return transaction.hash
+                else:
+                    # Return an error message if there are insufficient funds
+                    return "Insufficient funds"
+            else:
+                # We return an error message if the amount or commission is incorrect
+                return "Invalid amount or fee"
+        else:
+            # Return an error message if the addresses are incorrect
+            return "Invalid sender or recipient address"
+
+    # Method to get address balance
+    def get_balance(self, address):
         # Initialize the balance to zero
         balance = 0
         # We go through all the blocks in the chain
         for block in self.chain:
             # We go through all transactions in the block
             for transaction in block.transactions:
-                # We check that the transaction refers to the required token
-                if transaction["token"] == token:
-                    # Checking whether the address is the sender or recipient of the transaction
-                    if transaction["sender"] == address:
-                        # Reduce the balance by the transaction amount
-                        balance -= transaction["amount"]
-                    elif transaction["receiver"] == address:
-                        # We increase the balance by the transaction amount
-                        balance += transaction["amount"]
+                # If the address is the sender, then we reduce the balance by the transfer amount and commission
+                if transaction.sender == address:
+                    balance -= transaction.amount + transaction.fee
+                # If the address is the recipient, then we increase the balance by the transfer amount
+                if transaction.recipient == address:
+                    balance += transaction.amount
         # We return the balance
         return balance
 
-    # The method that mines a new block and adds it to the chain takes the following parameter:
-    # miner_address - address of the miner who will receive a reward for mining
-    def mine_block(self, miner_address):
-        # We get the number, time and hash of the last block in the chain
-        last_block = self.get_last_block()
-        last_index = last_block.index
-        last_hash = last_block.hash()
-        timestamp = time.time()
-        # Creating a list of transactions for a new block
-        transactions = []
-        # Add a transaction with a mining reward to the list
-        reward_transaction = {
-            "sender": None,
-            "receiver": miner_address,
-            "amount": self.reward,
-            "token": None,
-            "type": "transfer",
-            "data": None
-        }
-        transactions.append(reward_transaction)
-        # Add pending transactions to the list, checking their validity
-        for transaction in self.pending_transactions:
-            if self.validate_transaction(transaction):
-                transactions.append(transaction)
-        # Initialize the nonce to zero
-        nonce = 0
-        # We generate a hash of a new block until it satisfies the complexity condition
-        while True:
-            # Create an instance of the Block class with the current parameters
-            new_block = Block(last_index + 1, timestamp, transactions, last_hash, nonce)
-            # We get the hash of the new block
-            new_hash = new_block.hash()
-            # Checking that the hash starts with the required number of zeros
-            if new_hash.startswith("0" * self.difficulty):
-                # Adding a new block to the chain
-                self.chain.append(new_block)
-                # Clearing the list of pending transactions
-                self.pending_transactions = []
-                # We update information about startups, tokens and DApps, depending on the type of transaction
-                for transaction in transactions:
-                    if transaction["type"] == "create_startup":
-                        # Adding a startup to the startup dictionary
-                        self.startups[transaction["data"]["name"]] = transaction["data"]
-                    elif transaction["type"] == "create_token":
-                        # Adding a token to the token dictionary
-                        self.tokens[transaction["data"]["name"]] = transaction["data"]
-                        # We transfer the total number of tokens to the creator’s address
-                        self.add_transaction(None, transaction["sender"], transaction["data"]["supply"], transaction["data"]["name"], "transfer", None)
-                    elif transaction["type"] == "create_dapp":
-                        # Adding DApps to the DApps dictionary
-                        self.dapps[transaction["data"]["name"]] = transaction["data"]
-                # Returning a new block
-                return new_block
-            # Increase the nonce by one
-            nonce += 1
+    # Method for calculating block hash
+    def calculate_hash(self, index, timestamp, transactions, previous_hash, nonce):
+        # We serialize the block data into JSON format and encode it into bytes
+        block_string = json.dumps([index, timestamp, transactions, previous_hash, nonce], sort_keys=True).encode()
+        # Returning the block hash in hexadecimal format
+        return hashlib.sha256(block_string).hexdigest()
 
-    # A method that checks the validity of a block chain returns True or False
-    def validate_chain(self):
-        # We go through all the blocks in the chain, starting from the second
+    # Method for mining a new block
+    def mine_block(self):
+        # We get the index, time and hash of the last block
+        last_block = self.get_last_block()
+        index = last_block.index + 1
+        timestamp = time.time()
+        previous_hash = last_block.hash
+        # Initialize nonce and hash to zero
+        nonce = 0
+        hash = "0"
+        # While the hash does not satisfy the complexity condition, we increase the nonce and recalculate the hash
+        while not hash.startswith("0" * DIFFICULTY):
+            nonce += 1
+            hash = self.calculate_hash(index, timestamp, self.pending_transactions, previous_hash, nonce)
+        # Create a new block with the received data
+        block = Block(index, timestamp, self.pending_transactions, previous_hash, nonce, hash)
+        # Adding a new block to the chain
+        self.add_block(block)
+        # Returning a new block
+        return block
+
+    # Method for checking the validity of the chain
+    def is_valid(self):
+        # We go through all the blocks in the chain, starting from the secondы
         for i in range(1, len(self.chain)):
             # We get the current and previous blocks
             current_block = self.chain[i]
             previous_block = self.chain[i-1]
-            # Checking that the hash of the current block is correct
-            if current_block.hash() != current_block.hash():
+            # We check that the hash of the current block matches the calculated hash
+            if current_block.hash != current_block.calculate_hash():
                 return False
-            # We check that the hash of the previous block in the current block matches the hash of the previous block
-            if current_block.previous_hash != previous_block.hash():
+            # We check that the hash of the previous block matches the link to the previous block
+            if current_block.previous_hash != previous_block.hash:
                 return False
-            # We check that the hash of the current block satisfies the complexity condition
-            if not current_block.hash().startswith("0" * self.difficulty):
-                return False
-        # If all checks pass, return True
-
+        # Return True if all blocks are valid
         return True
 
-    # A method that returns information about a block by its number or hash takes a parameter:
-    if data["description"] == "" or data["code"] == "":
-              return False
-              return True
-                  # If all checks pass, return True
+    # Method for adding a new node to the network
+    def add_node(self, node_address):
+        # Checking that the host address is in the correct format
+        if node_address.startswith("http://") or node_address.startswith("https://"):
+            # Adding a node address to a set of nodes
+            self.nodes.add(node_address)
+            # Returning a success message
+            return f"Node {node_address} added to the network"
+        else:
+            # Returning an error message
+            return "Invalid node address"
 
-    # The method that checks that the address has enough funds for the transfer takes the following parameters:
-    # address - address who wants to make a transfer
-    # amount - transfer amount in UPC or tokens
-    # token - token name if the transfer is carried out in tokens, otherwise None
-    def has_enough_balance(self, address, amount, token):
-        # Calculate the address balance in UPC or tokens
-        balance = self.get_balance(address, token)
-        # Compare the balance with the transfer amount
-        return balance >= amount
+    # Method for synchronizing the chain with other network nodes
+    def sync_chain(self):
+        # Initialize a variable to store the longest chain
+        longest_chain = None
+        # Initialize a variable to store the length of the longest chain
+        max_length = len(self.chain)
+        # We go through all the nodes in the network
+        for node in self.nodes:
+            # Send a request to receive the node chain
+            response = requests.get(f"{node}/chain")
+            # If the request is successful
+            if response.status_code == 200:
+                # We get the length and chain of the node from the answer
+                length = response.json()["length"]
+                chain = response.json()["chain"]
+                # If the length of the node chain is greater than the length of the longest chain
+                if length > max_length:
+                    # Update the longest chain and its length
+                    longest_chain = chain
+                    max_length = length
+        # If the longest chain is found and it is valid
+        if longest_chain and self.is_valid(longest_chain):
+            # Replace our chain with the longest chain
+            self.chain = longest_chain
+            # Returning a success message
+            return "Chain synchronized with the network"
+        else:
+            # We return a message that our chain is up to date
+            return "Our chain is up to date"
 
-    # The method that calculates the balance of an address in UPC or tokens takes the following parameters:
-    # address - адрес, для которого вычисляется баланс
-    # token - название токена, если баланс вычисляется в токенах, иначе None
-    def get_balance(self, address, token):
-        # Initialize the balance to zero
-        balance = 0
+    # Method for adding a new startup to a block
+    def create_startup(self, sender, startup_name, startup_description, startup_date, fundraising_date, investment_offer, nft_info, required_funds, token_name, dapp_name, dapp_url):
+        # Checking that the sender has the correct address format
+        if len(sender) == 64:
+            # We check that the startup name is not empty and unique
+            if startup_name and not self.get_startup_by_name(startup_name):
+                # We check that the required amount of funds in dollars is positive and does not exceed the maximum number of coins
+                if 0 < required_funds <= MAX_SUPPLY:
+                    # We check that the sender has enough funds to pay the commission for adding a startup to the block
+                    if self.get_balance(sender) >= STARTUP_FEE:
+                        # Creating a dictionary with startup data
+                        startup_data = {
+                            "startup_name": startup_name,
+                            "startup_description": startup_description,
+                            "startup_date": startup_date,
+                            "fundraising_date": fundraising_date,
+                            "investment_offer": investment_offer,
+                            "nft_info": nft_info,
+                            "required_funds": required_funds,
+                            "token_name": token_name,
+                            "dapp_name": dapp_name,
+                            "dapp_url": dapp_url
+                        }
+                        # We create a transaction that sends a commission to the burning address and adds data about the startup to the block
+                        transaction = Transaction(sender, BURN_ADDRESS, 0, STARTUP_FEE, startup_data)
+                        # Adding a transaction to the list of pending transactions
+                        self.pending_transactions.append(transaction)
+                        # We increase the number of burned coins by commission
+                        self.burned_coins += STARTUP_FEE
+                        # Returning the transaction hash
+                        return transaction.hash
+                    else:
+                        # Return an error message if there are insufficient funds
+                        return "Insufficient funds"
+                else:
+                    # Return an error message if the required amount of funds is incorrect
+                    return "Invalid required funds"
+            else:
+                # Return an error message if the startup name is empty or not unique
+                return "Invalid or duplicate startup name"
+        else:
+            # Return an error message if the sender address is incorrect
+            return "Invalid sender address"
+
+    # Method to get startup by name
+    def get_startup_by_name(self, startup_name):
         # We go through all the blocks in the chain
         for block in self.chain:
             # We go through all transactions in the block
             for transaction in block.transactions:
-                # We check that the transaction refers to the required token
-                if transaction["token"] == token:
-                    # Checking whether the address is the sender or recipient of the transaction
-                    if transaction["sender"] == address:
-                        # Reduce the balance by the transaction amount
-                        balance -= transaction["amount"]
-                    elif transaction["receiver"] == address:
-                        # We increase the balance by the transaction amount
-                        balance += transaction["amount"]
-        # We return the balance
-        return balance
-
-    # The method that mines a new block and adds it to the chain takes the following parameter:
-    # miner_address - address of the miner who will receive a reward for mining
-    def mine_block(self, miner_address):
-        # We get the number, time and hash of the last block in the chain
-        last_block = self.get_last_block()
-        last_index = last_block.index
-        last_hash = last_block.hash()
-        timestamp = time.time()
-        # Создаем список транзакций для нового блока
-        transactions = []
-        # Add a transaction with a mining reward to the list
-        reward_transaction = {
-            "sender": None,
-            "receiver": miner_address,
-            "amount": self.reward,
-            "token": None,
-            "type": "transfer",
-            "data": None
-        }
-        transactions.append(reward_transaction)
-        # Add pending transactions to the list, checking their validity
-        for transaction in self.pending_transactions:
-            if self.validate_transaction(transaction):
-                transactions.append(transaction)
-        # Initialize the nonce to zero
-        nonce = 0
-        # Generating a block hash using nonce
-        block_hash = self.generate_hash(last_index + 1, timestamp, transactions, last_hash, nonce)
-        # Repeat until the hash satisfies the complexity condition
-        while not block_hash.startswith("0" * self.difficulty):
-            nonce += 1
-            block_hash = self.generate_hash(last_index + 1, timestamp, transactions, last_hash, nonce)
-        # We create an instance of the Block class with the received parameters
-        new_block = Block(last_index + 1, timestamp, transactions, last_hash, nonce)
-        # Adding a new block to the chain
-        self.chain.append(new_block)
-        # Clearing the list of pending transactions
-        self.pending_transactions = []
-        # We update information about startups, tokens and DApps, depending on the type of transaction
-        for transaction in transactions:
-            if transaction["type"] == "create_startup":
-                # Adding a startup to the startup dictionary
-                self.startups[transaction["data"]["name"]] = transaction["data"]
-            elif transaction["type"] == "create_token":
-                # Adding a token to the token dictionary
-                self.tokens[transaction["data"]["name"]] = transaction["data"]
-                # We transfer the total number of tokens to the creator’s address
-                self.add_transaction(None, transaction["receiver"], transaction["data"]["supply"], transaction["data"]["name"], "transfer", None)
-            elif transaction["type"] == "create_dapp":
-                # Adding DApps to the DApps dictionary
-                self.dapps[transaction["data"]["name"]] = transaction["data"]
-        # Returning a new block
-        return new_block
-
-    # The method that generates a block hash using parameters takes parameters:
-    # index - block number in the chain
-    # timestamp - block creation time
-    # transactions - list of transactions included in the block
-    # previous_hash - hash of the previous block in the chain
-    # nonce - random number used to generate the block hash
-    def generate_hash(self, index, timestamp, transactions, previous_hash, nonce):
-        # Create a dictionary with block parameters
-        block = {
-            "index": index,
-            "timestamp": timestamp,
-            "transactions": transactions,
-            "previous_hash": previous_hash,
-            "nonce": nonce
-        }
-        # Convert the dictionary to a string in JSON format
-        block_string = json.dumps(block, sort_keys=True)
-        # Calculate the hash of a string using the hashlib library
-        return hashlib.sha256(block_string.encode()).hexdigest()
-
-    # The method that checks the validity of the block chain takes the following parameter:
-    # chain - list of blocks to check
-    def validate_chain(self, chain):
-        # Checking that the chain is not empty
-        if len(chain) == 0:
-            return False
-        # We check that the first block in the chain is a genesis block
-        genesis_block = self.chain[0]
-        if chain[0]._dict_ != genesis_block._dict_:
-            return False
-        # We go through all the blocks in the chain, starting from the second
-        for i in range(1, len(chain)):
-            # We get the current and previous blocks
-            current_block = chain[i]
-            previous_block = chain[i-1]
-            # Checking that the hash of the current block is correct
-            if current_block.hash() != current_block.generate_hash(current_block.index, current_block.timestamp, current_block.transactions, current_block.previous_hash, current_block.nonce):
-                return False
-            # We check that the hash of the previous block matches the previous_hash attribute of the current block
-            if current_block.previous_hash != previous_block.hash():
-                return False
-            # We check that the hash of the current block satisfies the complexity condition
-            if not current_block.hash().startswith("0" * self.difficulty):
-                return False
-            # We check that all transactions in the current block are valid
-            for transaction in current_block.transactions:
-                if not self.validate_transaction(transaction):
-                    return False
-        # If all checks pass, return True
-        return True
-
-    # A method that replaces the current block chain with a longer one, if one exists.
-
- # A method that replaces the current block chain with a longer one, if one exists, takes the parameter:
-    # new_chain - a list of blocks that could potentially replace the current chain
-    def replace_chain(self, new_chain):
-        # Check that the new chain is longer than the current one
-        if len(new_chain) > len(self.chain):
-            # Checking that the new chain is valid
-            if self.validate_chain(new_chain):
-                # Replace the current chain with a new one
-                self.chain = new_chain
-                # Return True
-                return True
-        # Returning False
-        return False
-
-    # The method that returns information about a block by its hash takes the following parameter:
-    # block_hash - hash of the block to be found
-    def get_block_by_hash(self, block_hash):
-        # We go through all the blocks in the chain
-        for block in self.chain:
-            # Checking whether the block hash matches the desired one
-            if block.hash() == block_hash:
-                # Returning the block
-                return block
-        # Return None if the block is not found
-        return None
-
-    # The method that returns information about a startup by its name takes a parameter:
-    # startup_name - the name of the startup to be found
-    def get_startup_by_name(self, startup_name):
-        # Checking if the startup is in the startup dictionary
-        if startup_name in self.startups:
-            # We return information about the startup
-            return self.startups[startup_name]
+                # If the transaction contains startup data
+                if transaction.data and "startup_name" in transaction.data:
+                    # If the startup name matches what you are looking for
+                    if transaction.data["startup_name"] == startup_name:
+                        # We return data about the startup
+                        return transaction.data
         # Return None if the startup is not found
         return None
 
-    # A method that generates a user's address from 24 random words returns a string with the address
-    def generate_address(self):
-        # Create a list of words from which you can make an address
-        words = ["apple", "banana", "carrot", "dog", "elephant", "fish", "giraffe", "house", "ice", "jacket", "kite", "lion", "moon", "nose", "orange", "pencil", "queen", "rainbow", "star", "tree", "umbrella", "vase", "water", "xylophone"]
-        # Selecting 24 random words from the list
-        random_words = random.sample(words, 24)
-        # Connecting words into one line with spaces
-        address = " ".join(random_words)
-        # Returning the address
-        return address
+    # Method for creating a new NFT into a block
+    def create_nft(self, sender, nft_name, nft_description, nft_image, nft_price, nft_owner):
+        # Checking that the sender has the correct address format
+        if len(sender) == 64:
+            # Checking that the NFT name is not empty and unique
+            if nft_name and not self.get_nft_by_name(nft_name):
+                # We check that the NFT price is positive and does not exceed the maximum number of coins
+                if 0 < nft_price <= MAX_SUPPLY:
+                    # We check that the sender has enough funds to pay the fee for adding the NFT to the block
+                    if self.get_balance(sender) >= NFT_FEE:
+                        # Creating a dictionary with NFT data
+                        nft_data = {
+                            "nft_name": nft_name,
+                            "nft_description": nft_description,
+                            "nft_image": nft_image,
+                            "nft_price": nft_price,
+                            "nft_owner": nft_owner
+                        }
+                        # Create a transaction that sends a fee to the burn address and adds NFT data to the block
+                        transaction = Transaction(sender, BURN_ADDRESS, 0, NFT_FEE, nft_data)
+                        # Adding a transaction to the list of pending transactions
+                        self.pending_transactions.append(transaction)
+                        # We increase the number of burned coins by commission
+                        self.burned_coins += NFT_FEE
+                        # Returning the transaction hash
+                        return transaction.hash
+                    else:
+                        # Return an error message if there are insufficient funds
+                        return "Insufficient funds"
+                else:
+                    # Returning an error message if the NFT price is incorrect
+                    return "Invalid nft price"
+            else:
+                # Return an error message if the NFT name is empty or not unique
+                return "Invalid or duplicate nft name"
+        else:
+            # Return an error message if the sender address is incorrect
+            return "Invalid sender address"
 
-# We create an instance of the Blockchain class with the following parameters:
-# difficulty - 4, reward - 10
-up_chain = Blockchain(4, 10)
+    # Method to get NFT by name
+    def get_nft_by_name(self, nft_name):
+        # We go through all the blocks in the chain
+        for block in self.chain:
+            # We go through all transactions in the block
+            for transaction in block.transactions:
+                # If the transaction contains NFT data
+                if transaction.data and "nft_name" in transaction.data:
+                    # If the NFT name matches what you're looking for
+                    if transaction.data["nft_name"] == nft_name:
+                        # Returning NFT data
+                        return transaction.data
+        # Return None if NFT is not found
+        return None
 
-# Class to represent smart contracts
-class SmartContract:
+    # Method for creating a new token in a block
+    def create_token(self, sender, token_name, token_symbol, token_supply, token_price, token_owner):
+        # Checking that the sender has the correct address format
+        if len(sender) == 64:
+            # We check that the name and symbol of the token are not empty and unique
+            if token_name and token_symbol and not self.get_token_by_name(token_name) and not self.get_token_by_symbol(token_symbol):
+                # We check that the total quantity and price of the token are positive and do not exceed the maximum number of coins
+                if 0 < token_supply <= MAX_SUPPLY and 0 < token_price <= MAX_SUPPLY:
+                    # We check that the sender has enough funds to pay the commission for adding the token to the block
+                    if self.get_balance(sender) >= TOKEN_FEE:
+                        # Create a dictionary with token data
+                        token_data = {
+                            "token_name": token_name,
+                            "token_symbol": token_symbol,
+                            "token_supply": token_supply,
+                            "token_price": token_price,
+                            "token_owner": token_owner
+                        }
+                        # Create a transaction that sends a commission to the burn address and adds token data to the block
+                        transaction = Transaction(sender, BURN_ADDRESS, 0, TOKEN_FEE, token_data)
+                        # Adding a transaction to the list of pending transactions
+                        self.pending_transactions.append(transaction)
+                        # We increase the number of burned coins by commission
+                        self.burned_coins += TOKEN_FEE
+                        # Returning the transaction hash
 
-    # Class constructor
-    def __init__(self, code, sender, gas_limit):
-        self.code = code # Smart contract code
-        self.sender = sender # Smart contract sender address
-        self.gas_limit = gas_limit # Gas limit for smart contract execution
-        self.gas_used = 0 # The amount of gas used when executing a smart contract
-        self.state = {} # Smart contract status
+                        return transaction.hash
+                    else:
+                        # Return an error message if there are insufficient funds
+                        return "Insufficient funds"
+                else:
+                    # Return an error message if the total supply or price of a token is incorrect
+                    return "Invalid token supply or price"
+            else:
+                # Return an error message if the token name or symbol is empty or not unique
+                return "Invalid or duplicate token name or symbol"
+        else:
+            # Return an error message if the sender address is incorrect
+            return "Invalid sender address"
 
-    # Method for executing a smart contract
-    def execute(self, blockchain, transaction):
-        # Checking that the gas limit has not been exceeded
-        if self.gas_used > self.gas_limit:
-            return False, "Gas limit exceeded"
+    # Method for getting a token by name
+    def get_token_by_name(self, token_name):
+        # We go through all the blocks in the chain
+        for block in self.chain:
+            # We go through all transactions in the block
+            for transaction in block.transactions:
+                # If the transaction contains token data
+                if transaction.data and "token_name" in transaction.data:
+                    # If the token name matches the one you are looking for
+                    if transaction.data["token_name"] == token_name:
+                        # Returning token data
+                        return transaction.data
+        # Return None if the token is not found
+        return None
 
-        # Execute smart contract code in a secure environment
-        try:
-            exec(self.code, globals(), locals())
-        except Exception as e:
-            return False, "Smart contract execution error: " + str(e)
+    # Method for getting a token by symbol
+    def get_token_by_symbol(self, token_symbol):
+        # We go through all the blocks in the chain
+        for block in self.chain:
+            # We go through all transactions in the block
+            for transaction in block.transactions:
+                # If the transaction contains token data
+                if transaction.data and "token_symbol" in transaction.data:
+                    # If the token character matches the one you are looking for
+                    if transaction.data["token_symbol"] == token_symbol:
+                        # Returning token data
+                        return transaction.data
+        # Return None if the token is not found
+        return None
 
-        # Updating the state of the smart contract
-        self.state = locals()
+    # Method for creating a new DApp in a block
+    def create_dapp(self, sender, dapp_name, dapp_description, dapp_url, dapp_owner):
+        # Checking that the sender has the correct address format
+        if len(sender) == 64:
+            # Checking that the DApp name is not empty and unique
+            if dapp_name and not self.get_dapp_by_name(dapp_name):
+                # Checking that the DApp URL is in the correct format
+                if dapp_url.startswith("http://") or dapp_url.startswith("https://"):
+                    # We check that the sender has enough funds to pay the commission for adding the DApp to the block
+                    if self.get_balance(sender) >= DAPP_FEE:
+                        # Creating a dictionary with data about DApp
+                        dapp_data = {
+                            "dapp_name": dapp_name,
+                            "dapp_description": dapp_description,
+                            "dapp_url": dapp_url,
+                            "dapp_owner": dapp_owner
+                        }
+                        # Create a transaction that sends a commission to the burn address and adds data about the DApp to the block
+                        transaction = Transaction(sender, BURN_ADDRESS, 0, DAPP_FEE, dapp_data)
+                        # Adding a transaction to the list of pending transactions
+                        self.pending_transactions.append(transaction)
+                        # We increase the number of burned coins by commission
+                        self.burned_coins += DAPP_FEE
+                        # Returning the transaction hash
+                        return transaction.hash
+                    else:
+                        # Return an error message if there are insufficient funds
+                        return "Insufficient funds"
+                else:
+                    # Return an error message if the DApp URL is incorrect
+                    return "Invalid dapp url"
+            else:
+                # Return an error message if the DApp name is empty or not unique
+                return "Invalid or duplicate dapp name"
+        else:
+            # Return an error message if the sender address is incorrect
+            return "Invalid sender address"
 
-        # Returning the result of smart contract execution
-        return True, "Smart contract executed successfully"
+    # Method to get DApp by name
+    def get_dapp_by_name(self, dapp_name):
+        # We go through all the blocks in the chain
+        for block in self.chain:
+            # We go through all transactions in the block
+            for transaction in block.transactions:
+                # If the transaction contains DApp data
+                if transaction.data and "dapp_name" in transaction.data:
+                    # If the DApp name matches the searched one
+                    if transaction.data["dapp_name"] == dapp_name:
+                        # Returning data about the DApp
+                        return transaction.data
+        # Return None if DApp is not found
+        return None
 
-# Function for creating a smart contract
-def create_smart_contract(code, sender, gas_limit):
-    # Create an instance of the SmartContract class
-    smart_contract = SmartContract(code, sender, gas_limit)
+    # Method for receiving a transaction by hash
+    def get_transaction_by_hash(self, transaction_hash):
+        # We go through all the blocks in the chain
+        for block in self.chain:
+            # We go through all transactions in the block
+            for transaction in block.transactions:
+                # If the transaction hash matches the searched one
+                if transaction.hash == transaction_hash:
+                    # Returning the transaction
+                    return transaction
+        # Return None if transaction not found
+        return None
 
-    # Adding a smart contract to the list of blockchain smart contracts
-    blockchain.smart_contracts.append(smart_contract)
+    # Method for transferring coins between addresses
+    def transfer_coins(self, sender, recipient, amount, fee):
+        # Checking that the sender and recipient have the correct address format
+        if len(sender) == 64 and len(recipient) == 64:
+            # We check that the amount and commission are non-negative and do not exceed the maximum number of coins
+            if 0 <= amount <= MAX_SUPPLY and 0 <= fee <= MAX_SUPPLY:
+                # We check that the sender has sufficient funds for the transfer
+                if self.get_balance(sender) >= amount + fee:
+                    # Create a new transaction
+                    transaction = Transaction(sender, recipient, amount, fee, None)
+                    # Add it to the list of pending transactions
+                    self.pending_transactions.append(transaction)
+                    # Returning the transaction hash
+                    return transaction.hash
+                else:
+                    # Return an error message if there are insufficient funds
+                    return "Insufficient funds"
+            else:
+                # We return an error message if the amount or commission is incorrect
+                return "Invalid amount or fee"
+        else:
+            # Return an error message if the addresses are incorrect
+            return "Invalid sender or recipient address"
 
-    # Returning the smart contract
-    return smart_contract
-
-# Function for calling a smart contract
-def call_smart_contract(smart_contract, blockchain, transaction):
-    # We execute a smart contract
-    result, message = smart_contract.execute(blockchain, transaction)
-
-    # Returning the result and message
-    return result, message
+# Creating a Blockchain Instance
+up_chain = Blockchain()
